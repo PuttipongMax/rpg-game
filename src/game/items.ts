@@ -1,22 +1,22 @@
-// src/game/items.ts
+export interface ItemStats {
+  damage?: number;
+  defense?: number;
+}
 
 export interface Item {
   id: string;
   name: string;
-  type: 'weapon' | 'consumable';
-  stats: {
-    damage?: number;
-    hp?: number;
-  };
+  type: 'weapon' | 'armor' | 'consumable';
+  stats: ItemStats;
 }
 
-export const ITEMS: Record<string, Item> = {
+export const ITEMS: { [id: string]: Item } = {
   'sword': {
     id: 'sword',
-    name: 'Simple Sword',
+    name: 'Basic Sword',
     type: 'weapon',
     stats: {
-      damage: 5,
+        damage: 10
     }
   }
 };
