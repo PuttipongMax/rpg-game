@@ -75,7 +75,7 @@ export function startGame() {
     let activeChunks: Map<string, THREE.Group> = new Map();
     const CHUNK_SIZE = 20;
     const VISIBLE_CHUNKS = 5;
-    const direction = new THREE.Vector3();
+    // const direction = new THREE.Vector3();
 
     // --- D. UI ELEMENT REFERENCES ---
     const pauseMessage = document.getElementById('pauseMessage') as HTMLDivElement;
@@ -86,6 +86,87 @@ export function startGame() {
     const inventoryPanel = document.getElementById('inventory-panel')!;
     const inventoryGrid = document.getElementById('inventory-grid')!;
     const pauseBtn = document.getElementById('pause-btn') as HTMLButtonElement;
+
+    // [เพิ่มใหม่] Materials for chunks
+    const groundMaterial = new THREE.MeshPhongMaterial({ color: 0x88dd88 });
+    const trunkMaterial = new THREE.MeshPhongMaterial({ color: 0x8B4513 });
+    const leavesMaterial = new THREE.MeshPhongMaterial({ color: 0x228B22 });
+    const tokenGeometry = new THREE.CylinderGeometry(0.3, 0.3, 0.1, 16);
+    const bronzeTokenMaterial = new THREE.MeshPhongMaterial({ color: 0xCD7F32 });
+    const silverTokenMaterial = new THREE.MeshPhongMaterial({ color: 0xAAAAAA });
+    const goldTokenMaterial = new THREE.MeshPhongMaterial({ color: 0xFFD700 });
+
+    // [เพิ่มใหม่] ฟังก์ชันสร้างฉาก
+    function createTree(x: number, z: number): THREE.Group {
+        const tree = new THREE.Group();
+        const trunk = new THREE.Mesh(new THREE.BoxGeometry(0.5, 2, 0.5), trunkMaterial);
+        trunk.position.y = 1;
+        const leaves = new THREE.Mesh(new THREE.BoxGeometry(1.5, 2.5, 1.5), leavesMaterial);
+        leaves.position.y = 2.5;
+        tree.add(trunk, leaves);
+        tree.position.set(x, 0, z);
+        return tree;
+    }
+
+    function createToken(x: number, z: number, material: THREE.Material, type: TokenTypes): THREE.Mesh {
+        const token = new THREE.Mesh(tokenGeometry, material);
+        token.position.set(x, 0.05, z);
+        token.userData = { type };
+        return token;
+    }
+    function createChunk(zIndex: number, xIndex: number): THREE.Group {
+        const chunk = new THREE.Group();
+        const ground = new THREE.Mesh(new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE), groundMaterial);
+        ground.rotation.x = -Math.PI / 2;
+        chunk.add(ground);
+        const treeCount = THREE.MathUtils.randInt(3, 5);
+        for (let i = 0; i < treeCount; i++) {
+            const x = THREE.MathUtils.randFloat(-CHUNK_SIZE / 2, CHUNK_SIZE / 2);
+            const z = THREE.MathUtils.randFloat(-CHUNK_SIZE / 2, CHUNK_SIZE / 2);
+            chunk.add(createTree(x, z));
+        }
+        const tokenCount = THREE.MathUtils.randInt(2, 4);
+        for (let i = 0; i < tokenCount; i++) {
+            const x = THREE.MathUtils.randFloat(-CHUNK_SIZE / 2, CHUNK_SIZE / 2);
+            const z = THREE.MathUtils.randFloat(-CHUNK_SIZE / 2, CHUNK_SIZE / 2);
+            const rand = Math.random();
+            if (rand < 0.6) { chunk.add(createToken(x, z, silverTokenMaterial, 'silver')); }
+            else if (rand < 0.9) { chunk.add(createToken(x, z, bronzeTokenMaterial, 'bronze')); }
+            else { chunk.add(createToken(x, z, goldTokenMaterial, 'gold')); }
+        }
+        chunk.position.set(xIndex * CHUNK_SIZE, 0, zIndex * CHUNK_SIZE);
+        scene.add(chunk);
+        return chunk;
+    }
+
+    function updateChunks() {
+        if (!player) return;
+        const currentChunkX = Math.round(player.group.position.x / CHUNK_SIZE);
+        const currentChunkZ = Math.round(player.group.position.z / CHUNK_SIZE);
+        const halfVisible = Math.floor(VISIBLE_CHUNKS / 2);
+
+        // Create new chunks
+        for (let i = -halfVisible; i <= halfVisible; i++) {
+            for (let j = -halfVisible; j <= halfVisible; j++) {
+                const xIndex = currentChunkX + j;
+                const zIndex = currentChunkZ + i;
+                const chunkId = `${xIndex},${zIndex}`;
+                if (!activeChunks.has(chunkId)) {
+                    activeChunks.set(chunkId, createChunk(zIndex, xIndex));
+                }
+            }
+        }
+        
+        // Remove old chunks
+        for (const [chunkId, chunk] of activeChunks.entries()) {
+            const [xIndex, zIndex] = chunkId.split(',').map(Number);
+            if (Math.abs(xIndex - currentChunkX) > halfVisible + 1 || Math.abs(zIndex - currentChunkZ) > halfVisible + 1) {
+                scene.remove(chunk);
+                // You should properly dispose of geometries and materials here
+                activeChunks.delete(chunkId);
+            }
+        }
+    }
 
     // --- E. CORE GAME FUNCTIONS ---
     function createHuman(color: THREE.ColorRepresentation, isPlayer: boolean = false): Player {
@@ -229,6 +310,7 @@ export function startGame() {
             if (!keyboardState.l && isCharging) { if (elapsedTime - chargeStartTime >= 1.0) { attack(25, true); } isCharging = false; }
         }
         
+        const direction = new THREE.Vector3();
         direction.set(0, 0, 0);
         if (keyboardState.w) direction.z -= 1;
         if (keyboardState.s) direction.z += 1;
@@ -272,13 +354,36 @@ export function startGame() {
                 }
             }
         }
+
+        // [เพิ่มใหม่] - Token collection logic
+        const currentChunkX = Math.round(player.group.position.x / CHUNK_SIZE);
+        const currentChunkZ = Math.round(player.group.position.z / CHUNK_SIZE);
+        for (let dz = -1; dz <= 1; dz++) {
+            for (let dx = -1; dx <= 1; dx++) {
+                const chunk = activeChunks.get(`${currentChunkX + dx},${currentChunkZ + dz}`);
+                if (chunk) {
+                    for (let i = chunk.children.length - 1; i >= 0; i--) {
+                        const object = chunk.children[i] as THREE.Mesh;
+                        if (object.userData.type && ['bronze', 'silver', 'gold'].includes(object.userData.type)) {
+                            const tokenBox = new THREE.Box3().setFromObject(object);
+                            if (playerBox.intersectsBox(tokenBox)) {
+                                gameInventory[object.userData.type as TokenTypes]++;
+                                updateTokenUI();
+                                chunk.remove(object);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
         
         if (player.hp <= 0) {
             gameOver();
         }
         
         updateEnemy(delta);
-        // updateChunks();
+        updateChunks();
         updateHpBars();
         controls.update();
         renderer.render(scene, camera);
